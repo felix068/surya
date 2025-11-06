@@ -288,6 +288,16 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, epoch):
         outputs = model(pixel_values=images)
         logits = outputs.logits  # Shape: [B, 2, H, W]
 
+        # Interpolate logits to match mask size if needed
+        # The model may output at a different resolution (e.g., 128x128 instead of 512x512)
+        if logits.shape[2:] != text_masks.shape[1:]:
+            logits = F.interpolate(
+                logits,
+                size=text_masks.shape[1:],  # Target size (512, 512)
+                mode="bilinear",
+                align_corners=False
+            )
+
         # Extract text and affinity predictions
         text_pred = logits[:, 0, :, :]      # Text channel
         affinity_pred = logits[:, 1, :, :]  # Affinity channel
