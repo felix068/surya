@@ -354,13 +354,41 @@ def main():
     # 1. Load pretrained model
     # ========================================================================
     print("Loading pretrained Surya model...")
+
+    # Determine dtype based on device
+    if Config.DEVICE == "cuda":
+        dtype = torch.float16  # Use fp16 on GPU
+    else:
+        dtype = torch.float32  # Use fp32 on CPU
+
     config = EfficientViTConfig.from_pretrained(Config.PRETRAINED_MODEL)
     model = EfficientViTForSemanticSegmentation.from_pretrained(
         Config.PRETRAINED_MODEL,
-        config=config
+        config=config,
+        torch_dtype=dtype
     )
     model = model.to(Config.DEVICE)
-    print(f"Model loaded: {sum(p.numel() for p in model.parameters()):,} parameters")
+
+    # ========================================================================
+    # IMPORTANT: With small datasets (<1000 images), freeze the encoder
+    # Only fine-tune the decoder head to avoid destroying pretrained features
+    # ========================================================================
+    total_params = sum(p.numel() for p in model.parameters())
+
+    # Check if dataset is small
+    if len(os.listdir(Config.IMAGES_DIR)) < 1000:
+        print("⚠️  Small dataset detected (<1000 images)")
+        print("   Freezing encoder, fine-tuning decoder only...")
+
+        # Freeze encoder (EfficientViT backbone)
+        for name, param in model.named_parameters():
+            if "decode_head" not in name:
+                param.requires_grad = False
+
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Total parameters: {total_params:,}")
+    print(f"Trainable parameters: {trainable_params:,} ({trainable_params/total_params*100:.1f}%)")
+    print(f"Model dtype: {dtype}")
     print()
 
     # ========================================================================
