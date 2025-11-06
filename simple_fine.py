@@ -271,6 +271,21 @@ class CombinedLoss(nn.Module):
         return self.bce(pred, target) + self.dice(pred, target)
 
 
+def save_model_fp16(model, output_dir):
+    """
+    Save model in fp16 format to reduce file size.
+    Converts model to fp16, saves, then converts back to fp32 for continued training.
+    """
+    # Convert to fp16
+    model_fp16 = model.half()
+
+    # Save
+    model_fp16.save_pretrained(output_dir)
+
+    # Convert back to fp32 for training
+    model.float()
+
+
 def train_one_epoch(model, dataloader, optimizer, criterion, device, epoch):
     """Train for one epoch."""
     model.train()
@@ -355,17 +370,13 @@ def main():
     # ========================================================================
     print("Loading pretrained Surya model...")
 
-    # Determine dtype based on device
-    if Config.DEVICE == "cuda":
-        dtype = torch.float16  # Use fp16 on GPU
-    else:
-        dtype = torch.float32  # Use fp32 on CPU
-
+    # Load model in fp32 for training (more stable)
+    # Will be saved in fp16 at the end to reduce size
     config = EfficientViTConfig.from_pretrained(Config.PRETRAINED_MODEL)
     model = EfficientViTForSemanticSegmentation.from_pretrained(
         Config.PRETRAINED_MODEL,
         config=config,
-        torch_dtype=dtype
+        torch_dtype=torch.float32  # Always train in fp32
     )
     model = model.to(Config.DEVICE)
 
@@ -388,7 +399,6 @@ def main():
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Total parameters: {total_params:,}")
     print(f"Trainable parameters: {trainable_params:,} ({trainable_params/total_params*100:.1f}%)")
-    print(f"Model dtype: {dtype}")
     print()
 
     # ========================================================================
@@ -458,7 +468,7 @@ def main():
         if (epoch + 1) % Config.SAVE_EVERY == 0:
             checkpoint_dir = os.path.join(Config.OUTPUT_DIR, f"checkpoint_epoch_{epoch+1}")
             os.makedirs(checkpoint_dir, exist_ok=True)
-            model.save_pretrained(checkpoint_dir)
+            save_model_fp16(model, checkpoint_dir)
             print(f"  Saved checkpoint to {checkpoint_dir}")
 
         # Save best model
@@ -466,7 +476,7 @@ def main():
             best_loss = avg_loss
             best_dir = os.path.join(Config.OUTPUT_DIR, "best_model")
             os.makedirs(best_dir, exist_ok=True)
-            model.save_pretrained(best_dir)
+            save_model_fp16(model, best_dir)
             print(f"  New best model! Loss: {best_loss:.4f}")
 
         print()
@@ -476,7 +486,7 @@ def main():
     # ========================================================================
     final_dir = os.path.join(Config.OUTPUT_DIR, "final_model")
     os.makedirs(final_dir, exist_ok=True)
-    model.save_pretrained(final_dir)
+    save_model_fp16(model, final_dir)
 
     print("="*60)
     print("Training complete!")
